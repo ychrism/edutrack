@@ -4,8 +4,8 @@
  */
 'use client';
 
-import { useState } from 'react';
-import { signIn, getSession } from 'next-auth/react';
+import { useState, useEffect } from 'react';
+import { signIn, getSession, useSession } from 'next-auth/react';
 import { useRouter } from 'next/router';
 import { Eye, EyeOff, User, Lock } from 'lucide-react';
 
@@ -18,29 +18,64 @@ export default function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
+  const { data: session, status } = useSession();
+  const [loginSuccess, setLoginSuccess] = useState(false);
+
+  // Redirect to homepage if already authenticated
+  useEffect(() => {
+    if (status === 'loading') {
+      return; // Don't do anything while loading
+    }
+    
+    if (session) {
+      // Use window.location for a clean redirect that ensures the session is fully established
+      window.location.href = '/';
+    } else if (loginSuccess) {
+      // If login was successful but we don't have a session yet, force a hard refresh
+      window.location.href = '/';
+    }
+  }, [session, status, router, loginSuccess]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
-
+    
     try {
       const result = await signIn('credentials', {
         username: formData.username,
         password: formData.password,
         redirect: false,
       });
-
+      
       if (result?.error) {
-        setError('Nom d\'utilisateur ou mot de passe incorrect');
+        
+        // Provide more specific error messages based on the error
+        if (result.error === "CredentialsSignin") {
+          setError('Nom d\'utilisateur ou mot de passe incorrect');
+        } else {
+          setError(`Erreur d'authentification: ${result.error}`);
+        }
       } else {
-        const session = await getSession();
-        if (session) {
-          router.push('/');
+        try {
+          // Set login success state to trigger the useEffect
+          setLoginSuccess(true);
+          
+          // Force a session update - this is more reliable than router.replace
+          const freshSession = await getSession();
+          
+          if (freshSession) {
+            // Use window.location for a hard redirect
+            window.location.href = '/';
+          }
+          // else: The useEffect will handle redirect since loginSuccess is true
+        } catch (sessionError) {
+          // Still set loginSuccess to true so the useEffect can try to redirect
+          setLoginSuccess(true);
         }
       }
     } catch (error) {
-      setError('Une erreur est survenue lors de la connexion');
+      setError('Une erreur inattendue est survenue lors de la connexion');
     } finally {
       setIsLoading(false);
     }
@@ -53,6 +88,15 @@ export default function Login() {
     });
   };
 
+  // Show loading state while checking session
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-purple-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-purple-600"></div>
+      </div>
+    );
+  }
+  
   return (
     <div className="min-h-screen bg-purple-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
@@ -74,7 +118,11 @@ export default function Login() {
           <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
               <div className="bg-red-50 border-2 border-red-200 text-red-800 p-3 rounded-lg">
-                {error}
+                {error ? error : 
+                  router.query.error === 'CredentialsSignin' ? 'Nom d\'utilisateur ou mot de passe incorrect' : 
+                  router.query.error === 'SessionRequired' ? 'Veuillez vous connecter pour accéder à cette page' :
+                  router.query.error === 'AccessDenied' ? 'Accès refusé. Vous n\'avez pas les permissions requises' :
+                  router.query.error ? `Erreur d'authentification: ${router.query.error}` : ''}
               </div>
             )}
 
